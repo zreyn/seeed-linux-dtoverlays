@@ -71,65 +71,67 @@ static const struct can_bittiming_const mcp25xxfd_data_bittiming_const = {
 	.brp_inc = 1,
 };
 
+#if !__KER_INC_CAN_RX_OFFLOAD
 static int can_rx_offload_napi_poll(struct napi_struct *napi, int quota)
 {
-	struct can_rx_offload *offload = container_of(napi,struct can_rx_offload,napi);
-	struct net_device *dev = offload->dev;
-	struct net_device_stats *stats = &dev->stats;
-	struct sk_buff *skb;
-	int work_done = 0;
+    struct can_rx_offload *offload = container_of(napi,struct can_rx_offload,napi);
+    struct net_device *dev = offload->dev;
+    struct net_device_stats *stats = &dev->stats;
+    struct sk_buff *skb;
+    int work_done = 0;
 
-	while ((work_done < quota) &&
-	       (skb = skb_dequeue(&offload->skb_queue))) {
-		struct can_frame *cf = (struct can_frame *)skb->data;
+    while ((work_done < quota) &&
+           (skb = skb_dequeue(&offload->skb_queue))) {
+        struct can_frame *cf = (struct can_frame *)skb->data;
 
-		work_done++;
-		stats->rx_packets++;
-		stats->rx_bytes += cf->can_dlc;
-		netif_receive_skb(skb);
-	}
+        work_done++;
+        stats->rx_packets++;
+        stats->rx_bytes += cf->can_dlc;
+        netif_receive_skb(skb);
+    }
 
-	if (work_done < quota) {
-		napi_complete_done(napi, work_done);
+    if (work_done < quota) {
+        napi_complete_done(napi, work_done);
 
-		/* Check if there was another interrupt */
-		if (!skb_queue_empty(&offload->skb_queue))
-			napi_reschedule(&offload->napi);
-	}
+        /* Check if there was another interrupt */
+        if (!skb_queue_empty(&offload->skb_queue))
+            napi_reschedule(&offload->napi);
+    }
 
-	can_led_event(offload->dev, CAN_LED_EVENT_RX);
+    can_led_event(offload->dev, CAN_LED_EVENT_RX);
 
-	return work_done;
+    return work_done;
 }
 
 static int can_rx_offload_init_queue(struct net_device *dev,
-                                     struct can_rx_offload *offload,
-                                     unsigned int weight)
+                                    struct can_rx_offload *offload,
+                                    unsigned int weight)
 {
-	offload->dev = dev;
+    offload->dev = dev;
 
-	/* Limit queue len to 4x the weight (rounted to next power of two) */
-	offload->skb_queue_len_max = 2 << fls(weight);
-	offload->skb_queue_len_max *= 4;
-	skb_queue_head_init(&offload->skb_queue);
+    /* Limit queue len to 4x the weight (rounted to next power of two) */
+    offload->skb_queue_len_max = 2 << fls(weight);
+    offload->skb_queue_len_max *= 4;
+    skb_queue_head_init(&offload->skb_queue);
 
-	netif_napi_add(dev, &offload->napi, can_rx_offload_napi_poll, weight);
+    netif_napi_add(dev, &offload->napi, can_rx_offload_napi_poll, weight);
 
-	dev_dbg(dev->dev.parent, "%s: skb_queue_len_max=%d\n",
-		__func__, offload->skb_queue_len_max);
+    dev_dbg(dev->dev.parent, "%s: skb_queue_len_max=%d\n",
+        __func__, offload->skb_queue_len_max);
 
-	return 0;
+    return 0;
 }
 
 int can_rx_offload_add_manual(struct net_device *dev,
-                              struct can_rx_offload *offload,
-                              unsigned int weight)
+                             struct can_rx_offload *offload,
+                             unsigned int weight)
 {
-	if (offload->mailbox_read)
-		return -EINVAL;
+    if (offload->mailbox_read)
+        return -EINVAL;
 
-	return can_rx_offload_init_queue(dev, offload, weight);
+    return can_rx_offload_init_queue(dev, offload, weight);
 }
+#endif /* !__KER_INC_CAN_RX_OFFLOAD */
 
 
 
@@ -2908,8 +2910,13 @@ static int mcp25xxfd_probe(struct spi_device *spi)
 	if (err)
 		goto out_free_candev;
 
-	err = can_rx_offload_add_manual(ndev, &priv->offload,
-					MCP25XXFD_NAPI_WEIGHT);
+    /* Use in-tree CAN rx-offload on newer kernels */
+#if __KER_INC_CAN_RX_OFFLOAD
+    err = can_rx_offload_add_timestamp(ndev, &priv->offload);
+#else
+    err = can_rx_offload_add_manual(ndev, &priv->offload,
+                    MCP25XXFD_NAPI_WEIGHT);
+#endif
 	if (err)
 		goto out_free_candev;
 

@@ -27,6 +27,7 @@
 #include <sound/wm8960.h>
 
 #include "wm8960.h"
+#include "sound-compatible.h"
 
 #ifdef DEBUG
 #undef pr_fmt
@@ -57,8 +58,6 @@
 #define WM8960_DRES_MASK 0x30
 
 static bool is_pll_freq_available(unsigned int source, unsigned int target);
-static int wm8960_set_pll(struct snd_soc_codec *codec,
-		unsigned int freq_in, unsigned int freq_out);
 /*
  * wm8960 register cache
  * We can't read the WM8960 register space when we are
@@ -512,7 +511,7 @@ static int wm8960_add_widgets(struct snd_soc_codec *codec)
 	 * list each time to find the desired power state do so now
 	 * and save the result.
 	 */
-	list_for_each_entry(w, &codec->component.card->widgets, list) {
+	list_for_each_entry(w, &codec->card->widgets, list) {
 		if (w->dapm != dapm)
 			continue;
 		if (strcmp(w->name, "LOUT1 PGA") == 0)
@@ -529,7 +528,7 @@ static int wm8960_add_widgets(struct snd_soc_codec *codec)
 static int wm8960_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		unsigned int fmt)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_codec *codec = codec_dai->component;
 	u16 iface = 0;
 
 	pr_info();
@@ -728,7 +727,7 @@ static int wm8960_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params,
 			    struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_codec *codec = dai->component;
 	struct wm8960_priv *wm8960 = snd_soc_codec_get_drvdata(codec);
 	u16 iface = snd_soc_read(codec, WM8960_IFACE1) & 0xfff3;
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
@@ -756,6 +755,7 @@ static int wm8960_hw_params(struct snd_pcm_substream *substream,
 			iface |= 0x000c;
 			break;
 		}
+		fallthrough;
 	default:
 		dev_err(codec->dev, "unsupported width %d\n",
 			params_width(params));
@@ -791,7 +791,7 @@ static int wm8960_hw_params(struct snd_pcm_substream *substream,
 static int wm8960_hw_free(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_codec *codec = dai->component;
 	struct wm8960_priv *wm8960 = snd_soc_codec_get_drvdata(codec);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 
@@ -801,9 +801,9 @@ static int wm8960_hw_free(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int wm8960_mute(struct snd_soc_dai *dai, int mute)
+static int wm8960_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_codec *codec = dai->component;
 
 	pr_info();
 	if (mute)
@@ -1165,7 +1165,7 @@ static int wm8960_set_pll(struct snd_soc_codec *codec,
 static int wm8960_set_dai_pll(struct snd_soc_dai *codec_dai, int pll_id,
 		int source, unsigned int freq_in, unsigned int freq_out)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_codec *codec = codec_dai->component;
 	struct wm8960_priv *wm8960 = snd_soc_codec_get_drvdata(codec);
 
 	pr_info();
@@ -1180,7 +1180,7 @@ static int wm8960_set_dai_pll(struct snd_soc_dai *codec_dai, int pll_id,
 static int wm8960_set_dai_clkdiv(struct snd_soc_dai *codec_dai,
 		int div_id, int div)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_codec *codec = codec_dai->component;
 	u16 reg;
 
 	pr_info();
@@ -1223,7 +1223,7 @@ static int wm8960_set_bias_level(struct snd_soc_codec *codec,
 static int wm8960_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
 					unsigned int freq, int dir)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_codec *codec = dai->component;
 	struct wm8960_priv *wm8960 = snd_soc_codec_get_drvdata(codec);
 	unsigned osc_clk;
 
@@ -1239,6 +1239,7 @@ static int wm8960_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
 	case WM8960_SYSCLK_PLL:
 		snd_soc_update_bits(codec, WM8960_CLOCK1,
 					0x1, WM8960_SYSCLK_PLL);
+		fallthrough;
 	case WM8960_SYSCLK_AUTO:
 		wm8960_set_dai_pll(dai, clk_id, 0, osc_clk, freq);
 		break;
@@ -1261,7 +1262,7 @@ static int wm8960_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
 static const struct snd_soc_dai_ops wm8960_dai_ops = {
 	.hw_params = wm8960_hw_params,
 	.hw_free = wm8960_hw_free,
-	.digital_mute = wm8960_mute,
+	.mute_stream = wm8960_mute,
 	.set_fmt = wm8960_set_dai_fmt,
 	.set_clkdiv = wm8960_set_dai_clkdiv,
 	.set_pll = wm8960_set_dai_pll,
@@ -1283,7 +1284,7 @@ static struct snd_soc_dai_driver wm8960_dai = {
 		.rates = WM8960_RATES,
 		.formats = WM8960_FORMATS,},
 	.ops = &wm8960_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 };
 
 static int wm8960_probe(struct snd_soc_codec *codec)
@@ -1307,6 +1308,12 @@ static const struct snd_soc_codec_driver soc_codec_dev_wm8960 = {
 	.probe =	wm8960_probe,
 	.set_bias_level = wm8960_set_bias_level,
 	.suspend_bias_off = true,
+#if __NO_SND_SOC_CODEC_DRV
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
+#endif
 };
 
 static const struct regmap_config wm8960_regmap = {

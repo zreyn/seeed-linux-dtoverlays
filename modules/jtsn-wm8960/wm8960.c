@@ -58,6 +58,8 @@
 #define WM8960_DRES_MASK 0x30
 
 static bool is_pll_freq_available(unsigned int source, unsigned int target);
+static int wm8960_set_pll(struct snd_soc_codec *codec,
+		unsigned int freq_in, unsigned int freq_out);
 /*
  * wm8960 register cache
  * We can't read the WM8960 register space when we are

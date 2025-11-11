@@ -1314,7 +1314,7 @@ mcp25xxfd_handle_tefif_one(struct mcp25xxfd_priv *priv,
 	stats->tx_bytes +=
 		can_rx_offload_get_echo_skb(&priv->offload,
 					    mcp25xxfd_get_tef_tail(priv),
-					    hw_tef_obj->ts);
+					    hw_tef_obj->ts, 0);
 	stats->tx_packets++;
 
 	/* finally increment the TEF pointer */
@@ -1481,13 +1481,13 @@ mcp25xxfd_hw_rx_obj_to_skb(const struct mcp25xxfd_priv *priv,
 			cfd->flags |= CANFD_BRS;
 
 		dlc = FIELD_GET(MCP25XXFD_OBJ_FLAGS_DLC, hw_rx_obj->flags);
-		cfd->len = can_dlc2len(get_canfd_dlc(dlc));
+		cfd->len = can_fd_dlc2len(dlc);
 	} else {
 		if (hw_rx_obj->flags & MCP25XXFD_OBJ_FLAGS_RTR)
 			cfd->can_id |= CAN_RTR_FLAG;
 
-		cfd->len = get_can_dlc(FIELD_GET(MCP25XXFD_OBJ_FLAGS_DLC,
-						 hw_rx_obj->flags));
+		dlc = FIELD_GET(MCP25XXFD_OBJ_FLAGS_DLC, hw_rx_obj->flags);
+		cfd->len = dlc;
 	}
 
 	memcpy(cfd->data, hw_rx_obj->data, cfd->len);
@@ -2320,7 +2320,10 @@ mcp25xxfd_tx_obj_from_skb(const struct mcp25xxfd_priv *priv,
 	 * harm, only the lower 7 bits will be transferred into the
 	 * TEF object.
 	 */
-	dlc = can_len2dlc(cfd->len);
+	if (can_is_canfd_skb(skb))
+		dlc = can_fd_len2dlc(cfd->len);
+	else
+		dlc = cfd->len;
 	flags |= FIELD_PREP(MCP25XXFD_OBJ_FLAGS_SEQ_MCP2518FD_MASK, seq) |
 		FIELD_PREP(MCP25XXFD_OBJ_FLAGS_DLC, dlc);
 
@@ -2348,9 +2351,12 @@ mcp25xxfd_tx_obj_from_skb(const struct mcp25xxfd_priv *priv,
 	put_unaligned_le32(flags, &hw_tx_obj->flags);
 
 	/* Clear data at end of CAN frame */
-	// FIXME: what does the controller send in CANFD if can_dlc2len(can_len2dlc(cfd->len)) > cfd->len?
+	// FIXME: what does the controller send in CANFD if can_fd_dlc2len(can_fd_len2dlc(cfd->len)) > cfd->len?
 	offset = round_down(cfd->len, sizeof(u32));
-	len = round_up(can_dlc2len(dlc), sizeof(u32)) - offset;
+	if (can_is_canfd_skb(skb))
+		len = round_up(can_fd_dlc2len(dlc), sizeof(u32)) - offset;
+	else
+		len = round_up(dlc, sizeof(u32)) - offset;
 	if (len)
 		memset(hw_tx_obj->data + offset, 0x0, len);
 	memcpy(hw_tx_obj->data, cfd->data, cfd->len);
@@ -2422,7 +2428,7 @@ static netdev_tx_t mcp25xxfd_start_xmit(struct sk_buff *skb,
 		netif_stop_queue(ndev);
 	}
 
-	can_put_echo_skb(skb, ndev, tx_head);
+	can_put_echo_skb(skb, ndev, tx_head, 0);
 
 	err = mcp25xxfd_tx_obj_write(priv, tx_obj);
 	if (err)

@@ -1483,6 +1483,8 @@ mcp25xxfd_hw_rx_obj_to_skb(const struct mcp25xxfd_priv *priv,
 		dlc = FIELD_GET(MCP25XXFD_OBJ_FLAGS_DLC, hw_rx_obj->flags);
 		cfd->len = can_fd_dlc2len(dlc);
 	} else {
+		u8 dlc;
+
 		if (hw_rx_obj->flags & MCP25XXFD_OBJ_FLAGS_RTR)
 			cfd->can_id |= CAN_RTR_FLAG;
 
